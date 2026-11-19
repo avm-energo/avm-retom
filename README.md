@@ -10,5 +10,6 @@ Qt Widgets GUI for operating the RETOM-51 test bench through `libavm-retom`.
 Build: `cmake -B build -S . -DCMAKE_PREFIX_PATH=<qt>` (uses an installed libavm-retom, else `../libavm-retom`,
 else fetches from git). Run: `./build/avm-retom`.
 
-Note: libavm-retom ignores the output-contact number. Verified with a voltmeter on 2026-11-19: asking for contact 1
-closes contact 0 (twice); contacts 1-3 cannot be switched until the real frame layout is captured/reversed.
+Discrete outputs 0-3 were verified one by one with a voltmeter on 2026-11-19 (this needed a fix in libavm-retom:
+`setOutContact()` used to ignore the contact number). Disconnecting does not open closed contacts by itself, so the
+GUI opens all four before it disconnects.

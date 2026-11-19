@@ -63,6 +63,11 @@ void RetomWorker::disconnectDevice()
     guarded(QStringLiteral("disconnect"), [&] {
         if (!driver_)
             return;
+        // disconnect() does not open discrete outputs, so release all four ourselves first.
+        for (int n = 0; n < 4; ++n)
+        {
+            try { driver_->setOutContact(n, false); } catch (...) {}
+        }
         try
         {
             driver_->disconnect();

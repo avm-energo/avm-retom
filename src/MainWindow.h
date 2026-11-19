@@ -48,8 +48,7 @@ private:
     std::array<QDoubleSpinBox *, 3> u_, uPhi_, i_, phi_;
     QDoubleSpinBox *freq_;
     QPushButton *symmetricBtn_, *applyBtn_, *offBtn_, *verifyBtn_;
-    QSpinBox *outNumber_;
-    QPushButton *outCloseBtn_, *outOpenBtn_;
+    std::array<QPushButton *, 4> outBtns_;
     std::array<QCheckBox *, 8> inBits_;
     QLabel *inRaw_, *stateLabel_;
     QPlainTextEdit *log_;

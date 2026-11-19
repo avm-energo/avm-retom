@@ -101,16 +101,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // --- Discrete ---
     auto *discBox = new QGroupBox(tr("Discrete contacts"));
     auto *dl = new QGridLayout(discBox);
-    outNumber_ = new QSpinBox;
-    outNumber_->setRange(0, 31);
-    outNumber_->setToolTip(tr("Only contact 0 works: libavm-retom's encoder ignores the number, so contact 1 "
-                              "(measured on hardware 2026-11-19) just closes contact 0 again."));
-    outCloseBtn_ = new QPushButton(tr("Close"));
-    outOpenBtn_ = new QPushButton(tr("Open"));
-    dl->addWidget(new QLabel(tr("<b>Outputs</b> — contact #")), 0, 0);
-    dl->addWidget(outNumber_, 0, 1);
-    dl->addWidget(outCloseBtn_, 0, 2);
-    dl->addWidget(outOpenBtn_, 0, 3);
+    dl->addWidget(new QLabel(tr("<b>Outputs</b> (click to close/open)")), 0, 0);
+    auto *outL = new QHBoxLayout;
+    for (int n = 0; n < 4; ++n)
+    {
+        outBtns_[n] = new QPushButton(tr("Out %1: open").arg(n));
+        outBtns_[n]->setCheckable(true);
+        outBtns_[n]->setToolTip(tr("Output contact %1 (confirmed on hardware 2026-11-19)").arg(n));
+        outL->addWidget(outBtns_[n]);
+        // clicked (not toggled): only user clicks send a command, programmatic resets don't.
+        connect(outBtns_[n], &QPushButton::clicked, this, [this, n](bool closed) {
+            outBtns_[n]->setText(tr("Out %1: %2").arg(n).arg(closed ? tr("CLOSED") : tr("open")));
+            emit requestOutContact(n, closed);
+        });
+    }
+    outL->addStretch();
+    dl->addLayout(outL, 0, 1, 1, 3);
     dl->addWidget(new QLabel(tr("<b>Inputs</b> (polled 1/s)")), 1, 0);
     auto *bitsL = new QHBoxLayout;
     for (int b = 0; b < 8; ++b)
@@ -175,8 +181,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             phi_[k]->setValue(ph[k]);
         }
     });
-    connect(outCloseBtn_, &QPushButton::clicked, this, [this] { emit requestOutContact(outNumber_->value(), true); });
-    connect(outOpenBtn_, &QPushButton::clicked, this, [this] { emit requestOutContact(outNumber_->value(), false); });
 
     refreshPorts();
     onState(false, false, false);
@@ -234,7 +238,15 @@ void MainWindow::onState(bool connected, bool enabled, bool outputActive)
                                  enabled ? tr("yes") : tr("no"), outputActive ? tr("ON") : tr("off")));
     emit requestPolling(connected);
     if (!connected)
-        onInputs(0), inRaw_->setText(QStringLiteral("raw=—"));
+    {
+        onInputs(0);
+        inRaw_->setText(QStringLiteral("raw=—"));
+        for (int n = 0; n < 4; ++n)
+        {
+            outBtns_[n]->setChecked(false);
+            outBtns_[n]->setText(tr("Out %1: open").arg(n));
+        }
+    }
     updateEnabled();
 }
 
@@ -257,9 +269,10 @@ void MainWindow::updateEnabled()
     connectBtn_->setEnabled(idle && !connected_);
     disconnectBtn_->setEnabled(idle && connected_);
     verifyBtn_->setEnabled(idle && connected_ && !outputActive_);
-    for (QWidget *w : { static_cast<QWidget *>(applyBtn_), static_cast<QWidget *>(offBtn_),
-             static_cast<QWidget *>(outCloseBtn_), static_cast<QWidget *>(outOpenBtn_) })
-        w->setEnabled(idle && connected_);
+    applyBtn_->setEnabled(idle && connected_);
+    offBtn_->setEnabled(idle && connected_);
+    for (QPushButton *b : outBtns_)
+        b->setEnabled(idle && connected_);
     portCombo_->setEnabled(!connected_);
     refreshBtn_->setEnabled(!connected_);
     maxU_->setEnabled(!connected_);
