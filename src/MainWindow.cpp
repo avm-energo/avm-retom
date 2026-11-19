@@ -103,8 +103,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     auto *dl = new QGridLayout(discBox);
     outNumber_ = new QSpinBox;
     outNumber_->setRange(0, 31);
-    outNumber_->setToolTip(tr("libavm-retom only confirmed contact 0 against hardware; the number is currently "
-                              "ignored by the library's frame encoder."));
+    outNumber_->setToolTip(tr("Only contact 0 works: libavm-retom's encoder ignores the number, so contact 1 "
+                              "(measured on hardware 2026-11-19) just closes contact 0 again."));
     outCloseBtn_ = new QPushButton(tr("Close"));
     outOpenBtn_ = new QPushButton(tr("Open"));
     dl->addWidget(new QLabel(tr("<b>Outputs</b> — contact #")), 0, 0);
