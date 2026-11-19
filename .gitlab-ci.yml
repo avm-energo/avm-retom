@@ -54,7 +54,7 @@ package:rpm:
 
 # Windows installer, on the dedicated Windows runner (tag `windows`, shell executor, PowerShell) where Inno Setup 6
 # is installed. The machine also needs CMake, Visual Studio 2022 "Desktop development with C++" and a Qt 6 MSVC kit
-# (set QT_DIR to its prefix, e.g. C:\Qt\6.8.0\msvc2022_64, as a CI variable or machine env var). ISCC_PATH can
+# (QT_DIR defaults to C:\Qt\6.10.1\msvc2022_64, override it with a CI variable). ISCC_PATH can
 # override the default Inno Setup location.
 package:windows:
   stage: build
@@ -63,6 +63,8 @@ package:windows:
   extends: .build_rules
   variables:
     GIT_DEPTH: "0"
+    # Qt 6 MSVC kit on the runner; override with a CI/CD variable of the same name if it moves.
+    QT_DIR: 'C:\Qt\6.10.1\msvc2022_64'
   script:
     - |
       $ErrorActionPreference = "Stop"
