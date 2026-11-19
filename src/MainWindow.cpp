@@ -5,7 +5,9 @@
 
 #include <QAbstractButton>
 #include <QCheckBox>
+#include <QColor>
 #include <QComboBox>
+#include <QPalette>
 #include <QDateTime>
 #include <QDoubleSpinBox>
 #include <QGridLayout>
@@ -41,6 +43,16 @@ const char *kRoseBtn = "QPushButton{background:#ec6f9a;color:white;font-weight:b
                        "padding:5px 14px}QPushButton:hover{background:#f080a8}"
                        "QPushButton:disabled{background:#d0d0d0;color:#8a8a8a}";
 
+// Light-red, bright theme with black text.
+const char *kRedField = "{background:#ffb3b3;color:#000000}";
+const char *kOutBtn = "QPushButton{background:#ff6b6b;color:#000000;font-weight:bold;border:1px solid #d32f2f;"
+                      "border-radius:4px;padding:5px 10px}QPushButton:hover{background:#ff8585}"
+                      "QPushButton:checked{background:#ff1a1a;border:2px solid #8b0000}"
+                      "QPushButton:disabled{background:#d0d0d0;color:#8a8a8a;border-color:#b0b0b0}";
+const char *kInCheck = "QCheckBox{background:#ff9a9a;color:#000000;border-radius:3px;padding:3px 6px}"
+                       "QCheckBox:disabled{color:#000000}";
+const char *kLog = "QPlainTextEdit{background:#ffd0d0;color:#000000}";
+
 struct PhaseStyle
 {
     const char *badge; // solid colour of the phase letter badge
@@ -56,6 +68,12 @@ const PhaseStyle kPhase[3] = { { "#f2c200", "#000000", "#fff4bd" },
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("AVM RETOM"));
+    // Tinted window background so this window is easy to tell apart from its sibling app.
+    {
+        QPalette pal = palette();
+        pal.setColor(QPalette::Window, QColor("#f4e0e0"));
+        setPalette(pal);
+    }
     auto *central = new QWidget;
     auto *root = new QVBoxLayout(central);
     setCentralWidget(central);
@@ -69,6 +87,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     refreshBtn_ = new QPushButton(tr("Refresh"));
     maxU_ = spin(1, 300, 120, tr(" V"), 1);
     maxI_ = spin(0.1, 100, 20, tr(" A"), 1);
+    for (QWidget *w : { static_cast<QWidget *>(maxU_), static_cast<QWidget *>(maxI_) })
+        w->setStyleSheet(QStringLiteral("QDoubleSpinBox%1").arg(QLatin1String(kRedField)));
+    portCombo_->setStyleSheet(QStringLiteral("QComboBox%1 QComboBox QAbstractItemView{background:#ffd0d0;color:#000000}")
+                                  .arg(QLatin1String(kRedField)));
     connectBtn_ = new QPushButton(tr("Connect"));
     connectBtn_->setStyleSheet(QLatin1String(kGreenBtn));
     disconnectBtn_ = new QPushButton(tr("Disconnect"));
@@ -129,6 +151,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     verifyBtn_->setToolTip(tr("Applies 10 V / 0.1 A on phase A for 5 s, reads the Ready flag, then switches the "
                               "output off. Use it when currents are fine but voltages are zero. "
                               "Only available while the output is OFF."));
+    freq_->setStyleSheet(QStringLiteral("QDoubleSpinBox%1").arg(QLatin1String(kRedField)));
     g->addWidget(new QLabel(tr("Frequency:")), 4, 0);
     g->addWidget(freq_, 4, 1);
     g->addWidget(symmetricBtn_, 4, 2);
@@ -169,6 +192,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     {
         outBtns_[n] = new QPushButton(tr("Out %1: open").arg(n + 1));
         outBtns_[n]->setCheckable(true);
+        outBtns_[n]->setStyleSheet(QLatin1String(kOutBtn));
         outBtns_[n]->setToolTip(tr("Output contact %1 (confirmed on hardware 2026-11-19)").arg(n + 1));
         outL->addWidget(outBtns_[n]);
         // clicked (not toggled): only user clicks send a command, programmatic resets don't.
@@ -184,6 +208,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     for (int b = 0; b < 8; ++b)
     {
         inBits_[b] = new QCheckBox(QString::number(b + 1));
+        inBits_[b]->setStyleSheet(QLatin1String(kInCheck));
         inBits_[b]->setAttribute(Qt::WA_TransparentForMouseEvents);
         inBits_[b]->setFocusPolicy(Qt::NoFocus);
         bitsL->addWidget(inBits_[b]);
@@ -197,6 +222,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     log_ = new QPlainTextEdit;
     log_->setReadOnly(true);
     log_->setMaximumBlockCount(2000);
+    log_->setStyleSheet(QLatin1String(kLog));
     root->addWidget(log_, 1);
     statusBar()->addWidget(new QLabel(tr("Created by AVM-Energo LLC with Claude, 2026")));
     statusBar()->addPermanentWidget(stateLabel_);
