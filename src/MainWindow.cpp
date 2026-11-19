@@ -135,6 +135,23 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     g->addWidget(verifyBtn_, 4, 3, 1, 2);
     root->addWidget(anaBox);
 
+    // Tab goes down each column (A, B, C), then on to the next column to the right -- not along the
+    // rows as the default creation order would. Then frequency and the two buttons.
+    {
+        QWidget *prev = power_;
+        for (const auto &column : { u_, uPhi_, i_, phi_ })
+        {
+            for (QDoubleSpinBox *sb : column)
+            {
+                setTabOrder(prev, sb);
+                prev = sb;
+            }
+        }
+        setTabOrder(prev, freq_);
+        setTabOrder(freq_, symmetricBtn_);
+        setTabOrder(symmetricBtn_, verifyBtn_);
+    }
+
     reapplyTimer_ = new QTimer(this);
     reapplyTimer_->setSingleShot(true);
     reapplyTimer_->setInterval(400);
