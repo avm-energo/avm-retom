@@ -28,8 +28,8 @@ WizardStyle=modern
 OutputBaseFilename=avm-retom-setup-{#MyAppVersion}
 OutputDir={#OutDir}
 VersionInfoVersion={#MyAppVersion}
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
