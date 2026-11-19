@@ -43,3 +43,28 @@ qt_add_executable(avm-retom
 )
 
 target_link_libraries(avm-retom PRIVATE Qt6::Core Qt6::SerialPort Qt6::Widgets libavm-retom)
+
+# --- Install & packaging (CPack: DEB / RPM on Linux; the Windows installer is built by packaging/windows) ---
+include(GNUInstallDirs)
+install(TARGETS avm-retom RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(UNIX AND NOT APPLE)
+  install(FILES packaging/linux/avm-retom.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+endif()
+
+# CI passes -DAVM_RETOM_VERSION=<tag or tag-less build version>; defaults to the project version.
+set(AVM_RETOM_VERSION "${PROJECT_VERSION}" CACHE STRING "Version stamped on the packages")
+set(CPACK_PACKAGE_NAME "avm-retom")
+set(CPACK_PACKAGE_VERSION "${AVM_RETOM_VERSION}")
+set(CPACK_PACKAGE_VENDOR "AVM-Energo LLC")
+set(CPACK_PACKAGE_CONTACT "AVM-Energo LLC <info@avmenergo.ru>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "GUI client for the RETOM-51 test bench")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://git.avmenergo.ru/avm-energo/avm-retom")
+set(CPACK_PACKAGE_FILE_NAME "avm-retom-${AVM_RETOM_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_DEBIAN_PACKAGE_SECTION "electronics")
+set(CPACK_RPM_PACKAGE_LICENSE "Proprietary")
+set(CPACK_RPM_PACKAGE_GROUP "Applications/Engineering")
+set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+set(CPACK_RPM_PACKAGE_AUTOREQ ON)
+include(CPack)

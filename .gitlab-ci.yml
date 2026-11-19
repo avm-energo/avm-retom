@@ -1,0 +1,135 @@
+stages:
+  - build
+  - release
+
+# Same pre-baked Qt 6 images as libavm-retom / avm-tester (dockers repo). libavm-retom itself is fetched by CMake
+# from git.avmenergo.ru (anonymous HTTPS), so the runners need network access to that host.
+#
+# Version: tag vX.Y.Z -> X.Y.Z; any other build -> <project version>.<pipeline iid> (e.g. 0.1.0.47), which both
+# dpkg and rpm accept and which sorts after the base version.
+.version: &version
+  - |
+    if [ -n "$CI_COMMIT_TAG" ]; then
+      BUILD_VERSION="${CI_COMMIT_TAG#v}"
+    else
+      BUILD_VERSION="$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' CMakeLists.txt | head -1).$CI_PIPELINE_IID"
+    fi
+    echo "version: $BUILD_VERSION"
+
+.build_rules:
+  rules:
+    - if: '$CI_COMMIT_BRANCH || $CI_COMMIT_TAG'
+
+package:deb:
+  stage: build
+  image: vm-debci:5000/debian-trixie-qt6:latest
+  extends: .build_rules
+  script:
+    - *version
+    - command -v dpkg-shlibdeps >/dev/null || (apt-get update -qq && apt-get install -y -qq dpkg-dev)
+    - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DAVM_RETOM_VERSION="$BUILD_VERSION"
+    - cmake --build build -j"$(nproc)"
+    - cpack --config build/CPackConfig.cmake -G DEB -B dist
+  artifacts:
+    name: "avm-retom-deb-$CI_COMMIT_REF_SLUG"
+    paths:
+      - dist/*.deb
+    expire_in: 30 days
+
+package:rpm:
+  stage: build
+  image: vm-debci:5000/fedora-qt6:latest
+  extends: .build_rules
+  script:
+    - *version
+    - command -v rpmbuild >/dev/null || dnf install -y -q rpm-build
+    - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DAVM_RETOM_VERSION="$BUILD_VERSION"
+    - cmake --build build -j"$(nproc)"
+    - cpack --config build/CPackConfig.cmake -G RPM -B dist
+  artifacts:
+    name: "avm-retom-rpm-$CI_COMMIT_REF_SLUG"
+    paths:
+      - dist/*.rpm
+    expire_in: 30 days
+
+# Windows installer, on the dedicated Windows runner (tag `windows`, shell executor, PowerShell) where Inno Setup 6
+# is installed. The machine also needs CMake, Visual Studio 2022 "Desktop development with C++" and a Qt 6 MSVC kit
+# (set QT_DIR to its prefix, e.g. C:\Qt\6.8.0\msvc2022_64, as a CI variable or machine env var). ISCC_PATH can
+# override the default Inno Setup location.
+package:windows:
+  stage: build
+  tags:
+    - windows
+  extends: .build_rules
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - |
+      $ErrorActionPreference = "Stop"
+      function Check($what) { if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" } }
+      $iscc = if ($env:ISCC_PATH) { $env:ISCC_PATH } else { "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+      if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc - install Inno Setup 6 or set ISCC_PATH" }
+      if (-not $env:QT_DIR -or -not (Test-Path "$env:QT_DIR\bin\windeployqt.exe")) { throw "QT_DIR must point at a Qt 6 MSVC kit (the folder containing bin\windeployqt.exe)" }
+
+      if ($env:CI_COMMIT_TAG) { $ver = $env:CI_COMMIT_TAG.TrimStart("v") }
+      else {
+        $base = (Select-String -Path CMakeLists.txt -Pattern '^\s*VERSION\s+([0-9.]+)\s*$' | Select-Object -First 1).Matches.Groups[1].Value
+        $ver = "$base.$env:CI_PIPELINE_IID"
+      }
+      Write-Host "version: $ver"
+
+      cmake -S . -B build -DCMAKE_PREFIX_PATH="$env:QT_DIR" -DAVM_RETOM_VERSION="$ver"; Check "cmake configure"
+      cmake --build build --config Release --parallel; Check "cmake build"
+
+      Remove-Item -Recurse -Force deploy -ErrorAction SilentlyContinue
+      New-Item -ItemType Directory -Force deploy, dist | Out-Null
+      $exe = Get-ChildItem build -Recurse -Filter avm-retom.exe | Select-Object -First 1
+      if (-not $exe) { throw "avm-retom.exe not found under build\" }
+      Copy-Item $exe.FullName deploy\
+      & "$env:QT_DIR\bin\windeployqt.exe" --release --no-translations "deploy\avm-retom.exe"; Check "windeployqt"
+      & $iscc /Q "/DMyAppVersion=$ver" "/DDeployDir=$PWD\deploy" "/DOutDir=$PWD\dist" packaging\windows\avm-retom.iss; Check "ISCC"
+  artifacts:
+    name: "avm-retom-windows-$CI_COMMIT_REF_SLUG"
+    paths:
+      - dist/*.exe
+    expire_in: 30 days
+
+# On a version tag: upload the installer, .deb and .rpm to the project's Generic Package Registry (permanent, unlike
+# job artifacts) and create a Release. Each asset also gets a fixed direct_asset_path, so README links of the form
+#   <project>/-/releases/permalink/latest/downloads/avm-retom-setup.exe   (also avm-retom.deb, avm-retom.rpm)
+# always resolve to the newest release. Plain curl with the job token, no release-cli image needed.
+release:
+  stage: release
+  image: vm-debci:5000/debian-trixie-qt6:latest
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+  needs:
+    - job: package:deb
+      artifacts: true
+    - job: package:rpm
+      artifacts: true
+    - job: package:windows
+      artifacts: true
+  cache: []
+  script:
+    - command -v curl >/dev/null || (apt-get update -qq && apt-get install -y -qq curl)
+    - VERSION="${CI_COMMIT_TAG#v}"
+    - PKG="$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/avm-retom/$VERSION"
+    - EXE_FILE="$(cd dist && ls avm-retom-setup-*.exe)"
+    - DEB_FILE="$(cd dist && ls avm-retom*.deb)"
+    - RPM_FILE="$(cd dist && ls avm-retom*.rpm)"
+    - for f in "$EXE_FILE" "$DEB_FILE" "$RPM_FILE"; do curl --fail-with-body -sS -H "JOB-TOKEN:$CI_JOB_TOKEN" --upload-file "dist/$f" "$PKG/$f"; done
+    - |
+      cat > release.json <<JSON
+      {
+        "name": "avm-retom $CI_COMMIT_TAG",
+        "tag_name": "$CI_COMMIT_TAG",
+        "description": "Windows installer (.exe), Linux .deb and .rpm built from $CI_COMMIT_SHORT_SHA (pipeline #$CI_PIPELINE_IID).",
+        "assets": { "links": [
+          { "name": "$EXE_FILE", "url": "$PKG/$EXE_FILE", "direct_asset_path": "/avm-retom-setup.exe", "link_type": "package" },
+          { "name": "$DEB_FILE", "url": "$PKG/$DEB_FILE", "direct_asset_path": "/avm-retom.deb", "link_type": "package" },
+          { "name": "$RPM_FILE", "url": "$PKG/$RPM_FILE", "direct_asset_path": "/avm-retom.rpm", "link_type": "package" }
+        ] }
+      }
+      JSON
+    - 'curl --fail-with-body -sS -X POST -H "JOB-TOKEN: $CI_JOB_TOKEN" -H "Content-Type: application/json" --data @release.json "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"'

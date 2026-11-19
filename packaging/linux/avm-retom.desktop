@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=AVM RETOM
+Comment=GUI client for the RETOM-51 test bench
+Exec=avm-retom
+Terminal=false
+Categories=Utility;Electronics;
