@@ -1,7 +1,9 @@
 #include "MainWindow.h"
 
 #include "RetomWorker.h"
+#include "RockerSwitch.h"
 
+#include <QAbstractButton>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
@@ -16,6 +18,7 @@
 #include <QSerialPortInfo>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace
@@ -30,6 +33,24 @@ QDoubleSpinBox *spin(double min, double max, double val, const QString &suffix, 
     s->setKeyboardTracking(false);
     return s;
 }
+
+const char *kGreenBtn = "QPushButton{background:#43a047;color:white;font-weight:bold;border:none;border-radius:4px;"
+                        "padding:5px 14px}QPushButton:hover{background:#4caf50}"
+                        "QPushButton:disabled{background:#d0d0d0;color:#8a8a8a}";
+const char *kRoseBtn = "QPushButton{background:#ec6f9a;color:white;font-weight:bold;border:none;border-radius:4px;"
+                       "padding:5px 14px}QPushButton:hover{background:#f080a8}"
+                       "QPushButton:disabled{background:#d0d0d0;color:#8a8a8a}";
+
+struct PhaseStyle
+{
+    const char *badge; // solid colour of the phase letter badge
+    const char *text;  // letter colour
+    const char *tint;  // light background of the phase's spin boxes
+};
+// Phase A yellow, B green, C red.
+const PhaseStyle kPhase[3] = { { "#f2c200", "#000000", "#fff4bd" },
+    { "#2e9e44", "#ffffff", "#d3edd6" },
+    { "#d32f2f", "#ffffff", "#f8d0d0" } };
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
@@ -49,7 +70,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     maxU_ = spin(1, 300, 120, tr(" V"), 1);
     maxI_ = spin(0.1, 100, 20, tr(" A"), 1);
     connectBtn_ = new QPushButton(tr("Connect"));
+    connectBtn_->setStyleSheet(QLatin1String(kGreenBtn));
     disconnectBtn_ = new QPushButton(tr("Disconnect"));
+    disconnectBtn_->setStyleSheet(QLatin1String(kRoseBtn));
     stateLabel_ = new QLabel;
     connL->addWidget(new QLabel(tr("Port:")));
     connL->addWidget(portCombo_, 1);
@@ -63,8 +86,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     root->addWidget(connBox);
 
     // --- Analog output ---
-    auto *anaBox = new QGroupBox(tr("Analog output"));
-    auto *g = new QGridLayout(anaBox);
+    auto *anaBox = new QGroupBox;
+    auto *anaV = new QVBoxLayout(anaBox);
+    auto *head = new QHBoxLayout;
+    power_ = new RockerSwitch;
+    power_->setToolTip(tr("Analog output ON / OFF. While ON, changing a value re-applies the signal."));
+    auto *anaTitle = new QLabel(tr("<b>Analog output</b>"));
+    head->addWidget(power_);
+    head->addWidget(anaTitle);
+    head->addStretch();
+    anaV->addLayout(head);
+    auto *g = new QGridLayout;
+    anaV->addLayout(g);
     const char *hdr[] = { "", "U, V (RMS)", "U phase, °", "I, A (RMS)", "I phase, °" };
     for (int c = 0; c < 5; ++c)
         g->addWidget(new QLabel(tr(hdr[c])), 0, c);
@@ -75,7 +108,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         uPhi_[k] = spin(-360, 360, defPhase[k], QString(), 2);
         i_[k] = spin(0, 100, 0, QString(), 3);
         phi_[k] = spin(-360, 360, defPhase[k], QString(), 2);
-        g->addWidget(new QLabel(QStringLiteral("<b>%1</b>").arg(QChar('A' + k))), k + 1, 0);
+        auto *badge = new QLabel(QString(QChar('A' + k)));
+        badge->setAlignment(Qt::AlignCenter);
+        badge->setMinimumWidth(28);
+        badge->setStyleSheet(QStringLiteral("QLabel{background:%1;color:%2;font-weight:bold;border-radius:4px;padding:3px}")
+                                 .arg(QLatin1String(kPhase[k].badge), QLatin1String(kPhase[k].text)));
+        g->addWidget(badge, k + 1, 0);
+        for (QDoubleSpinBox *sb : { u_[k], uPhi_[k], i_[k], phi_[k] })
+            sb->setStyleSheet(QStringLiteral("QDoubleSpinBox{background:%1;color:#000000}")
+                                  .arg(QLatin1String(kPhase[k].tint)));
         g->addWidget(u_[k], k + 1, 1);
         g->addWidget(uPhi_[k], k + 1, 2);
         g->addWidget(i_[k], k + 1, 3);
@@ -84,19 +125,23 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     freq_ = spin(1, 1000, 50, tr(" Hz"), 3);
     symmetricBtn_ = new QPushButton(tr("3-phase from A"));
     symmetricBtn_->setToolTip(tr("Copy phase A's U/I to B and C with phases 0/-120/-240° (I in phase with U)"));
-    applyBtn_ = new QPushButton(tr("Apply"));
-    offBtn_ = new QPushButton(tr("Output OFF"));
     verifyBtn_ = new QPushButton(tr("Check voltage stage"));
     verifyBtn_->setToolTip(tr("Applies 10 V / 0.1 A on phase A for 5 s, reads the Ready flag, then switches the "
                               "output off. Use it when currents are fine but voltages are zero. "
-                              "Only available while no signal is applied."));
-    g->addWidget(verifyBtn_, 5, 0, 1, 2);
+                              "Only available while the output is OFF."));
     g->addWidget(new QLabel(tr("Frequency:")), 4, 0);
     g->addWidget(freq_, 4, 1);
     g->addWidget(symmetricBtn_, 4, 2);
-    g->addWidget(applyBtn_, 4, 3);
-    g->addWidget(offBtn_, 4, 4);
+    g->addWidget(verifyBtn_, 4, 3, 1, 2);
     root->addWidget(anaBox);
+
+    reapplyTimer_ = new QTimer(this);
+    reapplyTimer_->setSingleShot(true);
+    reapplyTimer_->setInterval(400);
+    connect(reapplyTimer_, &QTimer::timeout, this, [this] {
+        if (outputActive_ && connected_)
+            onApply();
+    });
 
     // --- Discrete ---
     auto *discBox = new QGroupBox(tr("Discrete contacts"));
@@ -105,14 +150,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     auto *outL = new QHBoxLayout;
     for (int n = 0; n < 4; ++n)
     {
-        outBtns_[n] = new QPushButton(tr("Out %1: open").arg(n));
+        outBtns_[n] = new QPushButton(tr("Out %1: open").arg(n + 1));
         outBtns_[n]->setCheckable(true);
-        outBtns_[n]->setToolTip(tr("Output contact %1 (confirmed on hardware 2026-11-19)").arg(n));
+        outBtns_[n]->setToolTip(tr("Output contact %1 (confirmed on hardware 2026-11-19)").arg(n + 1));
         outL->addWidget(outBtns_[n]);
         // clicked (not toggled): only user clicks send a command, programmatic resets don't.
         connect(outBtns_[n], &QPushButton::clicked, this, [this, n](bool closed) {
-            outBtns_[n]->setText(tr("Out %1: %2").arg(n).arg(closed ? tr("CLOSED") : tr("open")));
-            emit requestOutContact(n, closed);
+            outBtns_[n]->setText(tr("Out %1: %2").arg(n + 1).arg(closed ? tr("CLOSED") : tr("open")));
+            emit requestOutContact(n, closed); // driver index is 0-based, the UI numbers from 1
         });
     }
     outL->addStretch();
@@ -121,7 +166,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     auto *bitsL = new QHBoxLayout;
     for (int b = 0; b < 8; ++b)
     {
-        inBits_[b] = new QCheckBox(QString::number(b));
+        inBits_[b] = new QCheckBox(QString::number(b + 1));
         inBits_[b]->setAttribute(Qt::WA_TransparentForMouseEvents);
         inBits_[b]->setFocusPolicy(Qt::NoFocus);
         bitsL->addWidget(inBits_[b]);
@@ -136,6 +181,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     log_->setReadOnly(true);
     log_->setMaximumBlockCount(2000);
     root->addWidget(log_, 1);
+    statusBar()->addWidget(new QLabel(tr("Created by AVM-Energo LLC with Claude, 2026")));
     statusBar()->addPermanentWidget(stateLabel_);
 
     // --- Worker thread ---
@@ -169,8 +215,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
                                          : portCombo_->currentData().toString(),
                      maxU_->value(), maxI_->value()); });
     connect(disconnectBtn_, &QPushButton::clicked, this, [this] { emit requestDisconnect(); });
-    connect(applyBtn_, &QPushButton::clicked, this, &MainWindow::onApply);
-    connect(offBtn_, &QPushButton::clicked, this, [this] { emit requestOff(); });
+    connect(power_, &QAbstractButton::clicked, this, &MainWindow::onPowerClicked);
+    for (int k = 0; k < 3; ++k)
+        for (QDoubleSpinBox *sb : { u_[k], uPhi_[k], i_[k], phi_[k] })
+            connect(sb, &QDoubleSpinBox::valueChanged, this, [this] { reapplyTimer_->start(); });
+    connect(freq_, &QDoubleSpinBox::valueChanged, this, [this] { reapplyTimer_->start(); });
     connect(symmetricBtn_, &QPushButton::clicked, this, [this] {
         const double ph[3] = { 0, -120, -240 };
         for (int k = 0; k < 3; ++k)
@@ -232,10 +281,19 @@ void MainWindow::onApply()
     emit requestApply(s);
 }
 
+void MainWindow::onPowerClicked(bool on)
+{
+    if (on)
+        onApply();
+    else
+        emit requestOff();
+}
+
 void MainWindow::onState(bool connected, bool enabled, bool outputActive)
 {
     connected_ = connected;
     outputActive_ = outputActive;
+    power_->setChecked(outputActive); // setChecked() does not emit clicked(), so this sends no command
     stateLabel_->setText(tr("%1 | enabled: %2 | output: %3")
                              .arg(connected ? tr("connected") : tr("disconnected"),
                                  enabled ? tr("yes") : tr("no"), outputActive ? tr("ON") : tr("off")));
@@ -247,7 +305,7 @@ void MainWindow::onState(bool connected, bool enabled, bool outputActive)
         for (int n = 0; n < 4; ++n)
         {
             outBtns_[n]->setChecked(false);
-            outBtns_[n]->setText(tr("Out %1: open").arg(n));
+            outBtns_[n]->setText(tr("Out %1: open").arg(n + 1));
         }
     }
     updateEnabled();
@@ -272,8 +330,7 @@ void MainWindow::updateEnabled()
     connectBtn_->setEnabled(idle && !connected_);
     disconnectBtn_->setEnabled(idle && connected_);
     verifyBtn_->setEnabled(idle && connected_ && !outputActive_);
-    applyBtn_->setEnabled(idle && connected_);
-    offBtn_->setEnabled(idle && connected_);
+    power_->setEnabled(idle && connected_);
     for (QPushButton *b : outBtns_)
         b->setEnabled(idle && connected_);
     portCombo_->setEnabled(!connected_);

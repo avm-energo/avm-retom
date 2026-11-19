@@ -38,6 +38,8 @@ qt_add_executable(avm-retom
     src/MainWindow.cpp
     src/RetomWorker.h
     src/RetomWorker.cpp
+    src/RockerSwitch.h
+    src/RockerSwitch.cpp
 )
 
 target_link_libraries(avm-retom PRIVATE Qt6::Core Qt6::SerialPort Qt6::Widgets libavm-retom)

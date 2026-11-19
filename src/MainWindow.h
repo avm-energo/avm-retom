@@ -12,7 +12,9 @@ class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
 class QCheckBox;
+class QTimer;
 class RetomWorker;
+class RockerSwitch;
 
 class MainWindow : public QMainWindow
 {
@@ -33,6 +35,7 @@ signals:
 private:
     void refreshPorts();
     void onApply();
+    void onPowerClicked(bool on);
     void onState(bool connected, bool enabled, bool outputActive);
     void onInputs(quint32 bits);
     void onBusy(bool on);
@@ -47,7 +50,9 @@ private:
     QDoubleSpinBox *maxU_, *maxI_;
     std::array<QDoubleSpinBox *, 3> u_, uPhi_, i_, phi_;
     QDoubleSpinBox *freq_;
-    QPushButton *symmetricBtn_, *applyBtn_, *offBtn_, *verifyBtn_;
+    RockerSwitch *power_;
+    QTimer *reapplyTimer_;
+    QPushButton *symmetricBtn_, *verifyBtn_;
     std::array<QPushButton *, 4> outBtns_;
     std::array<QCheckBox *, 8> inBits_;
     QLabel *inRaw_, *stateLabel_;

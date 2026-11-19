@@ -111,7 +111,7 @@ void RetomWorker::setOutContact(int number, bool closed)
         if (!driver_)
             throw retom::RetomNotConnected();
         driver_->setOutContact(number, closed);
-        emit log(QStringLiteral("Output contact #%1 -> %2").arg(number).arg(closed ? "closed" : "open"));
+        emit log(QStringLiteral("Output contact %1 -> %2").arg(number + 1).arg(closed ? "closed" : "open"));
     });
 }
 
