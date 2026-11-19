@@ -206,7 +206,10 @@ void MainWindow::refreshPorts()
         portCombo_->addItem(QStringLiteral("%1 — %2%3").arg(info.systemLocation(), info.description(),
                                 isRetom ? QStringLiteral(" [FTDI 0403:6001]") : QString()),
             info.systemLocation());
-        if (isRetom && best < 0)
+        // The EMon's FT232R adapter shares VID/PID 0403:6001 with RETOM, so prefer the "Dynamics" device.
+        const bool dynamics = info.description().contains(QLatin1String("Dynamics"), Qt::CaseInsensitive)
+           ;
+        if (isRetom && (best < 0 || (dynamics && !portCombo_->itemText(best).contains(QLatin1String("Dynamics"), Qt::CaseInsensitive))))
             best = portCombo_->count() - 1;
     }
     if (best >= 0)
