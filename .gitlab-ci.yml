@@ -22,7 +22,9 @@ stages:
 
 package:deb:
   stage: build
-  image: vm-debci:5000/debian-trixie-qt6:latest
+  image:
+    name: vm-debci:5000/debian-trixie-qt6:latest
+    pull_policy: always
   extends: .build_rules
   script:
     - *version
@@ -38,9 +40,15 @@ package:deb:
 
 package:rpm:
   stage: build
-  image: vm-debci:5000/fedora-qt6:latest
+  image:
+    name: vm-debci:5000/fedora-qt6:latest
+    # The runner's default "if-not-present" keeps serving a stale local copy after the image is rebuilt
+    # under the same tag; always re-check the registry so RPMs are built against the current Fedora/Qt.
+    pull_policy: always
   extends: .build_rules
   script:
+    - grep PRETTY_NAME /etc/os-release
+    - rpm -q qt6-qtbase-devel || true
     - *version
     - command -v rpmbuild >/dev/null || dnf install -y -q rpm-build
     - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DAVM_RETOM_VERSION="$BUILD_VERSION"
@@ -102,7 +110,9 @@ package:windows:
 # always resolve to the newest release. Plain curl with the job token, no release-cli image needed.
 release:
   stage: release
-  image: vm-debci:5000/debian-trixie-qt6:latest
+  image:
+    name: vm-debci:5000/debian-trixie-qt6:latest
+    pull_policy: always
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
   needs:
