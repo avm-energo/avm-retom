@@ -20,6 +20,10 @@ qt_standard_project_setup()
 find_package(libavm-retom QUIET)
 if(libavm-retom_FOUND)
   message(STATUS "Found package libavm-retom")
+  # The installed package exports libavm-retom::libavm-retom; the rest of this file links the plain name.
+  if(NOT TARGET libavm-retom AND TARGET libavm-retom::libavm-retom)
+    add_library(libavm-retom ALIAS libavm-retom::libavm-retom)
+  endif()
 else()
   set(AVM_RETOM_LOCAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../libavm-retom" CACHE PATH "Local libavm-retom checkout")
   if(EXISTS "${AVM_RETOM_LOCAL_DIR}/CMakeLists.txt")
@@ -29,6 +33,20 @@ else()
     add_subdirectory("${AVM_RETOM_LOCAL_DIR}" libavm-retom EXCLUDE_FROM_ALL)
   else()
     include(retom)
+  endif()
+endif()
+
+# libavm-vectorwidget (vector diagram): same lookup order.
+find_package(libavm-vectorwidget QUIET)
+if(libavm-vectorwidget_FOUND)
+  message(STATUS "Found package libavm-vectorwidget")
+else()
+  set(AVM_VECTORWIDGET_LOCAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../libavm-vectorwidget" CACHE PATH "Local libavm-vectorwidget checkout")
+  if(EXISTS "${AVM_VECTORWIDGET_LOCAL_DIR}/CMakeLists.txt")
+    message(STATUS "Using local libavm-vectorwidget: ${AVM_VECTORWIDGET_LOCAL_DIR}")
+    add_subdirectory("${AVM_VECTORWIDGET_LOCAL_DIR}" libavm-vectorwidget EXCLUDE_FROM_ALL)
+  else()
+    include(vectorwidget)
   endif()
 endif()
 
@@ -42,7 +60,7 @@ qt_add_executable(avm-retom
     src/RockerSwitch.cpp
 )
 
-target_link_libraries(avm-retom PRIVATE Qt6::Core Qt6::SerialPort Qt6::Widgets libavm-retom)
+target_link_libraries(avm-retom PRIVATE Qt6::Core Qt6::SerialPort Qt6::Widgets libavm-retom libavm-vectorwidget)
 
 # --- Install & packaging (CPack: DEB / RPM on Linux; the Windows installer is built by packaging/windows) ---
 include(GNUInstallDirs)

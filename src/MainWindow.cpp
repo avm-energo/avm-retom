@@ -3,6 +3,8 @@
 #include "RetomWorker.h"
 #include "RockerSwitch.h"
 
+#include <cmath>
+
 #include <QAbstractButton>
 #include <QCheckBox>
 #include <QColor>
@@ -22,6 +24,7 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <libavm-vectorwidget/VectorDiagram.h>
 
 namespace
 {
@@ -107,15 +110,27 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     connL->addWidget(disconnectBtn_);
     root->addWidget(connBox);
 
+    // Everything below the connection row sits in the left column; the vector diagram takes the right.
+    auto *body = new QHBoxLayout;
+    auto *left = new QVBoxLayout;
+    body->addLayout(left, 1);
+    root->addLayout(body, 1);
+
     // --- Analog output ---
     auto *anaBox = new QGroupBox;
     auto *anaV = new QVBoxLayout(anaBox);
+    verifyBtn_ = new QPushButton(tr("Check voltage stage"));
+    verifyBtn_->setToolTip(tr("Applies 10 V / 0.1 A on phase A for 5 s, reads the Ready flag, then switches the "
+                              "output off. Use it when currents are fine but voltages are zero. "
+                              "Only available while the output is OFF."));
     auto *head = new QHBoxLayout;
     power_ = new RockerSwitch;
     power_->setToolTip(tr("Analog output ON / OFF. While ON, changing a value re-applies the signal."));
     auto *anaTitle = new QLabel(tr("<b>Analog output</b>"));
     head->addWidget(power_);
     head->addWidget(anaTitle);
+    head->addSpacing(16);
+    head->addWidget(verifyBtn_);
     head->addStretch();
     anaV->addLayout(head);
     auto *g = new QGridLayout;
@@ -145,23 +160,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         g->addWidget(phi_[k], k + 1, 4);
     }
     freq_ = spin(1, 1000, 50, tr(" Hz"), 3);
-    symmetricBtn_ = new QPushButton(tr("3-phase from A"));
-    symmetricBtn_->setToolTip(tr("Copy phase A's U/I to B and C with phases 0/-120/-240° (I in phase with U)"));
-    verifyBtn_ = new QPushButton(tr("Check voltage stage"));
-    verifyBtn_->setToolTip(tr("Applies 10 V / 0.1 A on phase A for 5 s, reads the Ready flag, then switches the "
-                              "output off. Use it when currents are fine but voltages are zero. "
-                              "Only available while the output is OFF."));
+    symmetricBtn_ = new QPushButton(tr("U: 3-phase from A"));
+    symmetricBtn_->setToolTip(tr("Set phases B and C voltage to phase A's magnitude, with the angles shifted by -120° / -240° from phase A's U angle"));
+    symmetricIBtn_ = new QPushButton(tr("I: 3-phase from A"));
+    symmetricIBtn_->setToolTip(tr("Set phases B and C current to phase A's magnitude, with the angles shifted by -120° / -240° from phase A's I angle"));
     freq_->setStyleSheet(QStringLiteral("QDoubleSpinBox%1").arg(QLatin1String(kRedField)));
     g->addWidget(new QLabel(tr("Frequency:")), 4, 0);
     g->addWidget(freq_, 4, 1);
     g->addWidget(symmetricBtn_, 4, 2);
-    g->addWidget(verifyBtn_, 4, 3, 1, 2);
-    root->addWidget(anaBox);
+    g->addWidget(symmetricIBtn_, 4, 4);
+    left->addWidget(anaBox);
 
     // Tab goes down each column (A, B, C), then on to the next column to the right -- not along the
     // rows as the default creation order would. Then frequency and the two buttons.
     {
-        QWidget *prev = power_;
+        setTabOrder(power_, verifyBtn_);
+        QWidget *prev = verifyBtn_;
         for (const auto &column : { u_, uPhi_, i_, phi_ })
         {
             for (QDoubleSpinBox *sb : column)
@@ -172,7 +186,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         }
         setTabOrder(prev, freq_);
         setTabOrder(freq_, symmetricBtn_);
-        setTabOrder(symmetricBtn_, verifyBtn_);
+        setTabOrder(symmetricBtn_, symmetricIBtn_);
     }
 
     reapplyTimer_ = new QTimer(this);
@@ -217,13 +231,30 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     bitsL->addWidget(inRaw_);
     bitsL->addStretch();
     dl->addLayout(bitsL, 1, 1, 1, 3);
-    root->addWidget(discBox);
+    left->addWidget(discBox);
 
     log_ = new QPlainTextEdit;
     log_->setReadOnly(true);
     log_->setMaximumBlockCount(2000);
     log_->setStyleSheet(QLatin1String(kLog));
-    root->addWidget(log_, 1);
+    left->addWidget(log_, 1);
+
+    // --- Vector diagram of the set-points (what the output is, or will be, generating) ---
+    diagram_ = new avm_vectorwidget::VectorDiagram;
+    diagram_->setMinimumWidth(340);
+    diagram_->setPalette(palette()); // keep the window tint
+    body->addWidget(diagram_, 1);
+    auto updateDiagram = [this] {
+        for (int k = 0; k < 3; ++k)
+        {
+            diagram_->setVoltage(k, u_[k]->value(), uPhi_[k]->value());
+            diagram_->setCurrent(k, i_[k]->value(), phi_[k]->value());
+        }
+    };
+    for (int k = 0; k < 3; ++k)
+        for (QDoubleSpinBox *sb : { u_[k], uPhi_[k], i_[k], phi_[k] })
+            connect(sb, &QDoubleSpinBox::valueChanged, this, updateDiagram);
+    updateDiagram();
     statusBar()->addWidget(new QLabel(tr("Created by AVM-Energo LLC with Claude, 2026")));
     statusBar()->addPermanentWidget(stateLabel_);
 
@@ -263,20 +294,29 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         for (QDoubleSpinBox *sb : { u_[k], uPhi_[k], i_[k], phi_[k] })
             connect(sb, &QDoubleSpinBox::valueChanged, this, [this] { reapplyTimer_->start(); });
     connect(freq_, &QDoubleSpinBox::valueChanged, this, [this] { reapplyTimer_->start(); });
-    connect(symmetricBtn_, &QPushButton::clicked, this, [this] {
+    // Three-phase from A: B and C get A's magnitude and A's angle shifted by -120 / -240 degrees.
+    auto shifted = [](double a, int k) {
         const double ph[3] = { 0, -120, -240 };
-        for (int k = 0; k < 3; ++k)
+        return std::fmod(a + ph[k], 360.0);
+    };
+    connect(symmetricBtn_, &QPushButton::clicked, this, [this, shifted] {
+        for (int k = 1; k < 3; ++k)
         {
             u_[k]->setValue(u_[0]->value());
+            uPhi_[k]->setValue(shifted(uPhi_[0]->value(), k));
+        }
+    });
+    connect(symmetricIBtn_, &QPushButton::clicked, this, [this, shifted] {
+        for (int k = 1; k < 3; ++k)
+        {
             i_[k]->setValue(i_[0]->value());
-            uPhi_[k]->setValue(ph[k]);
-            phi_[k]->setValue(ph[k]);
+            phi_[k]->setValue(shifted(phi_[0]->value(), k));
         }
     });
 
     refreshPorts();
     onState(false, false, false);
-    resize(820, 640);
+    resize(1180, 680);
 }
 
 MainWindow::~MainWindow()
@@ -289,25 +329,53 @@ MainWindow::~MainWindow()
 
 void MainWindow::refreshPorts()
 {
-    const QString prev = portCombo_->currentText();
+    const QString prevText = portCombo_->currentText();
+    const QString prevLoc = portCombo_->currentData().toString();
+    QStringList oldLocs;
+    for (int i = 0; i < portCombo_->count(); ++i)
+        oldLocs << portCombo_->itemData(i).toString();
+
     portCombo_->clear();
-    int best = -1;
-    for (const QSerialPortInfo &info : QSerialPortInfo::availablePorts())
+    // The EMon's FT232R adapter shares VID/PID 0403:6001 with RETOM, so prefer the "Dynamics" device.
+    int best = -1, bestNew = -1, prevIdx = -1;
+    auto better = [this](int cand, int cur) {
+        if (cur < 0)
+            return true;
+        const auto isDyn = [this](int i) { return portCombo_->itemText(i).contains(QLatin1String("Dynamics"), Qt::CaseInsensitive); };
+        return isDyn(cand) && !isDyn(cur);
+    };
+    const auto ports = QSerialPortInfo::availablePorts();
+    for (const QSerialPortInfo &info : ports)
     {
         const bool isRetom = info.vendorIdentifier() == retom::kRetomVid && info.productIdentifier() == retom::kRetomPid;
         portCombo_->addItem(QStringLiteral("%1 — %2%3").arg(info.systemLocation(), info.description(),
                                 isRetom ? QStringLiteral(" [FTDI 0403:6001]") : QString()),
             info.systemLocation());
-        // The EMon's FT232R adapter shares VID/PID 0403:6001 with RETOM, so prefer the "Dynamics" device.
-        const bool dynamics = info.description().contains(QLatin1String("Dynamics"), Qt::CaseInsensitive)
-           ;
-        if (isRetom && (best < 0 || (dynamics && !portCombo_->itemText(best).contains(QLatin1String("Dynamics"), Qt::CaseInsensitive))))
-            best = portCombo_->count() - 1;
+        const int idx = portCombo_->count() - 1;
+        if (info.systemLocation() == prevLoc)
+            prevIdx = idx;
+        if (isRetom)
+        {
+            if (better(idx, best))
+                best = idx;
+            if (!oldLocs.contains(info.systemLocation()) && better(idx, bestNew))
+                bestNew = idx;
+        }
     }
-    if (best >= 0)
+    // A newly plugged-in RETOM wins; otherwise keep what the user had selected; otherwise the best guess.
+    if (bestNew >= 0 && !oldLocs.isEmpty())
+        portCombo_->setCurrentIndex(bestNew);
+    else if (prevIdx >= 0)
+        portCombo_->setCurrentIndex(prevIdx);
+    else if (best >= 0)
         portCombo_->setCurrentIndex(best);
     else if (portCombo_->count() == 0)
-        portCombo_->setEditText(prev.isEmpty() ? QStringLiteral("/dev/ttyUSB0") : prev);
+        portCombo_->setEditText(prevText.isEmpty() ? QStringLiteral("/dev/ttyUSB0") : prevText);
+
+    QStringList names;
+    for (const QSerialPortInfo &info : ports)
+        names << info.systemLocation();
+    appendLog(tr("Ports refreshed: %1 found%2").arg(ports.size()).arg(names.isEmpty() ? QString() : QStringLiteral(" (") + names.join(QStringLiteral(", ")) + QLatin1Char(')')));
 }
 
 void MainWindow::onApply()
@@ -377,7 +445,7 @@ void MainWindow::updateEnabled()
     for (QPushButton *b : outBtns_)
         b->setEnabled(idle && connected_);
     portCombo_->setEnabled(!connected_);
-    refreshBtn_->setEnabled(!connected_);
+    refreshBtn_->setEnabled(true); // stays usable while connected: the device may have been unplugged
     maxU_->setEnabled(!connected_);
     maxI_->setEnabled(!connected_);
     setCursor(busy_ ? Qt::BusyCursor : Qt::ArrowCursor);

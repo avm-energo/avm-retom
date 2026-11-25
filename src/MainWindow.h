@@ -10,6 +10,7 @@ class QDoubleSpinBox;
 class QLabel;
 class QPlainTextEdit;
 class QPushButton;
+namespace avm_vectorwidget { class VectorDiagram; }
 class QSpinBox;
 class QCheckBox;
 class QTimer;
@@ -50,9 +51,10 @@ private:
     QDoubleSpinBox *maxU_, *maxI_;
     std::array<QDoubleSpinBox *, 3> u_, uPhi_, i_, phi_;
     QDoubleSpinBox *freq_;
+    avm_vectorwidget::VectorDiagram *diagram_;
     RockerSwitch *power_;
     QTimer *reapplyTimer_;
-    QPushButton *symmetricBtn_, *verifyBtn_;
+    QPushButton *symmetricBtn_, *symmetricIBtn_, *verifyBtn_;
     std::array<QPushButton *, 4> outBtns_;
     std::array<QCheckBox *, 8> inBits_;
     QLabel *inRaw_, *stateLabel_;
